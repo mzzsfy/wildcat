@@ -16,6 +16,8 @@ type header struct {
 }
 
 type HTTPParser struct {
+	subscribeHeader       [][]byte
+	subscribeAllHeader    bool
 	Method, Path, Version []byte
 
 	Headers      []header
@@ -28,7 +30,7 @@ type HTTPParser struct {
 	contentLengthRead bool
 }
 
-const DefaultHeaderSlice = 10
+const DefaultHeaderSlice = 4
 
 // Create a new parser
 func NewHTTPParser() *HTTPParser {
@@ -38,9 +40,10 @@ func NewHTTPParser() *HTTPParser {
 // Create a new parser allocating size for size headers
 func NewSizedHTTPParser(size int) *HTTPParser {
 	return &HTTPParser{
-		Headers:       make([]header, size),
-		TotalHeaders:  size,
-		contentLength: -1,
+		Headers:            make([]header, size),
+		TotalHeaders:       size,
+		contentLength:      -1,
+		subscribeAllHeader: true,
 	}
 }
 
@@ -192,16 +195,26 @@ loop:
 			default:
 				continue
 			}
-
-			hp.Headers[h] = header{headerName, input[start:i]}
-			h++
-
-			if h == hp.TotalHeaders {
-				newHeaders := make([]header, hp.TotalHeaders+10)
-				copy(newHeaders, hp.Headers)
-				hp.Headers = newHeaders
-				hp.TotalHeaders += 10
+			if headerName[0] == 'C' && bytes.Equal(headerName, cContentLength) {
+				i, err := strconv.ParseInt(string(input[start:i]), 10, 0)
+				if err == nil {
+					hp.contentLength = i
+				}
+				hp.contentLengthRead = true
+				hp.addHeader(h, headerName, input[start:i])
+			} else if hp.subscribeAllHeader {
+				hp.addHeader(h, headerName, input[start:i])
+			} else {
+				for _, b := range hp.subscribeHeader {
+					if headerName[0] == b[0] {
+						if bytes.Equal(headerName, b) {
+							hp.addHeader(h, headerName, input[start:i])
+							break
+						}
+					}
+				}
 			}
+			h++
 		case eHeaderValueN:
 			if input[i] != '\n' {
 				return 0, ErrBadProto
@@ -238,6 +251,37 @@ loop:
 	}
 
 	return 0, ErrMissingData
+}
+
+func (hp *HTTPParser) addHeader(headerIndex int, headerName, headerValue []byte) {
+	hp.Headers[headerIndex] = header{headerName, headerValue}
+	if headerIndex+1 == hp.TotalHeaders {
+		newHeaders := make([]header, hp.TotalHeaders+DefaultHeaderSlice)
+		copy(newHeaders, hp.Headers)
+		hp.Headers = newHeaders
+		hp.TotalHeaders += DefaultHeaderSlice
+	}
+}
+
+func (hp *HTTPParser) Reset() {
+	for _, h := range hp.Headers {
+		h.Name = nil
+		h.Value = nil
+	}
+	hp.hostRead = false
+	hp.contentLengthRead = false
+	hp.contentLength = -1
+	if len(hp.Headers) > len(hp.subscribeHeader)+1 {
+		hp.Headers = hp.Headers[:len(hp.subscribeHeader)+1]
+	}
+}
+
+func (hp *HTTPParser) SubscribeAllHeader(sub bool) {
+	hp.subscribeAllHeader = sub
+}
+
+func (hp *HTTPParser) SubscribeHeader(name []byte) {
+	hp.subscribeHeader = append(hp.subscribeHeader, name)
 }
 
 // Return a value of a header matching name.
@@ -315,7 +359,16 @@ func (hp *HTTPParser) Get() bool {
 }
 
 var cPost = []byte("POST")
+var cPut = []byte("PUT")
 
 func (hp *HTTPParser) Post() bool {
 	return bytes.Equal(hp.Method, cPost)
+}
+
+func (hp *HTTPParser) Put() bool {
+	return bytes.Equal(hp.Method, cPut)
+}
+
+func (hp *HTTPParser) PostOrPut() bool {
+	return hp.Post() || hp.Put()
 }
