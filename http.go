@@ -360,6 +360,7 @@ func (hp *HTTPParser) Get() bool {
 
 var cPost = []byte("POST")
 var cPut = []byte("PUT")
+var cPATCH = []byte("PATCH")
 
 func (hp *HTTPParser) Post() bool {
 	return bytes.Equal(hp.Method, cPost)
@@ -369,6 +370,14 @@ func (hp *HTTPParser) Put() bool {
 	return bytes.Equal(hp.Method, cPut)
 }
 
+func (hp *HTTPParser) Patch() bool {
+	return bytes.Equal(hp.Method, cPATCH)
+}
+
 func (hp *HTTPParser) PostOrPut() bool {
 	return hp.Post() || hp.Put()
+}
+
+func (hp *HTTPParser) ExistBody() bool {
+	return hp.PostOrPut() || hp.Patch()
 }
