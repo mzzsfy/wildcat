@@ -378,6 +378,6 @@ func (hp *HTTPParser) PostOrPut() bool {
 	return hp.Post() || hp.Put()
 }
 
-func (hp *HTTPParser) ExistBody() bool {
+func (hp *HTTPParser) MethodExistBody() bool {
 	return hp.PostOrPut() || hp.Patch()
 }
